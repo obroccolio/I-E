@@ -1,4 +1,4 @@
-import { Briefcase, User, MessageSquare, PanelLeftClose, PanelLeft, Shield } from "lucide-react";
+import { Briefcase, User, MessageSquare, PanelLeftClose, PanelLeft, Shield, Sparkles } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSidebar } from "../contexts/SidebarContext";
@@ -72,6 +72,15 @@ export function Sidebar() {
             >
               <User className="w-4 h-4" />
               {t("nav.profile")}
+            </Link>
+            <Link
+              to="/resume-optimization"
+              className={`flex items-center gap-3 w-full p-3 rounded-xl transition-colors text-sm font-medium ${
+                isActive('/resume-optimization') ? 'bg-gray-200 text-gray-900' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <Sparkles className="w-4 h-4" />
+              简历优化
             </Link>
             {role === "admin" && (
               <Link

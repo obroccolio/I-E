@@ -12,6 +12,7 @@ import { ChatScreen } from "./screens/ChatScreen";
 import { ProfileConfirmationScreen } from "./screens/ProfileConfirmationScreen";
 import { DashboardScreen } from "./screens/DashboardScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
+import ResumeOptimizationScreen from "./screens/ResumeOptimizationScreen";
 import { SidebarProvider } from "./contexts/SidebarContext";
 import AdminLayout from "./screens/admin/AdminLayout";
 import AdminDashboard from "./screens/admin/AdminDashboard";
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="/profile-confirmation" element={<ProfileConfirmationScreen />} />
             <Route path="/dashboard" element={<DashboardScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />
+            <Route path="/resume-optimization" element={<ResumeOptimizationScreen />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

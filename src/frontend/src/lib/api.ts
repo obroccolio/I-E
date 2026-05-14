@@ -82,4 +82,7 @@ export const api = {
   getMyMatches: (status?: string) => req("GET", `/matches/me${status ? `?status=${status}` : ""}`),
   updateMatchStatus: (match_id: number, status: string) => req("PATCH", `/matches/${match_id}`, { status }),
   trackEvent: (event_type: string, user_id?: number, payload?: any) => req("POST", "/events", { event_type, user_id, payload }),
+  scoreResume: (resumeText: string, targetJD?: string) => req("POST", "/resume/score", { resumeText, targetJD }),
+  optimizeResume: (resumeText: string, targetJD?: string) =>
+    req("POST", "/resume/optimize", { resumeText, targetJD }),
 };
