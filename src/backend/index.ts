@@ -20,6 +20,7 @@ import eventRoutes from "./routes/events.ts";
 import matchRoutes from "./routes/matches.ts";
 import resumeRoutes from "./routes/resumeOptimization.ts";
 import adminRoutes from "./routes/admin/index.ts";
+import bossRoutes from "./routes/boss.ts";
 
 initSchema();
 seedAdmin();
@@ -46,6 +47,7 @@ app.use("/api/chat", authGuard, chatRoutes);
 app.use("/api/matches", authGuard, matchRoutes);
 app.use("/api/resume", authGuard, resumeRoutes);
 app.use("/api/events", authGuard, eventRoutes);
+app.use("/api/boss", authGuard, bossRoutes);
 app.use("/api/admin", adminRoutes);
 
 // Serve frontend static files from built dist/ (relative to backend dir -> ../frontend/dist)

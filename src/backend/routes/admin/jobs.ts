@@ -2,6 +2,7 @@ import { Router } from "express";
 import * as svc from "../../services/adminJobService.ts";
 import { AppError } from "../../utils/AppError.ts";
 import { logAction } from "../../services/adminSystemService.ts";
+import { dedupAll, dedupCompany } from "../../services/jobDedup.ts";
 
 const router = Router();
 
@@ -73,6 +74,23 @@ router.patch("/jobs/:id/status", (req, res, next) => {
 
     logAction((req as any).user.id, "job.status_update", "job", Number(req.params.id), { status });
     res.json({ job });
+  } catch (e) { next(e); }
+});
+
+// POST /api/admin/jobs/dedup — trigger LLM cross-platform dedup
+router.post("/jobs/dedup", async (_req, res, next) => {
+  try {
+    const result = await dedupAll((msg) => console.log("[Dedup]", msg));
+    res.json({ ok: true, ...result });
+  } catch (e) { next(e); }
+});
+
+// POST /api/admin/jobs/dedup/:company — trigger dedup for a single company
+router.post("/jobs/dedup/:company", async (req, res, next) => {
+  try {
+    const company = decodeURIComponent(req.params.company);
+    const updated = await dedupCompany(company);
+    res.json({ ok: true, company, jobsUpdated: updated });
   } catch (e) { next(e); }
 });
 

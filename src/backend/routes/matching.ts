@@ -33,6 +33,7 @@ router.get("/stream", async (req, res) => {
   const userId = (req as any).user.id;
   const limit = Number(req.query.limit ?? 5);
   const force = req.query.force !== "0"; // default true, pass 0 to use cached
+  const chatContext = req.query.chatContext ? String(req.query.chatContext) : undefined;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -47,7 +48,7 @@ router.get("/stream", async (req, res) => {
   const onStep = (step: AgentStep) => send(step);
 
   try {
-    const results = await runMatching(userId, { limit, force, onStep });
+    const results = await runMatching(userId, { limit, force, onStep, chatContext });
     // Fetch full job data for recommendations
     if (results.length > 0) {
       const jobIds = results.map(r => r.jobId);

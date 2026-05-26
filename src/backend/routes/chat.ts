@@ -3,7 +3,7 @@ import db from "../db/connection.ts";
 import { openai } from "../services/openaiClient.ts";
 import { ENV } from "../config/env.ts";
 import { AppError } from "../utils/AppError.ts";
-import { extractPreferenceUpdates } from "../services/chatProcessor.ts";
+import { extractPreferenceUpdates, extractPreferenceUpdatesLLM, applyDeltas } from "../services/chatProcessor.ts";
 
 const router = Router();
 
@@ -133,13 +133,22 @@ router.post("/", async (req, res, next) => {
       .filter(h => !h.content.startsWith("[AI") && !h.content.startsWith("[AI temporarily"))
       .map(h => ({ role: h.role, content: h.content }));
 
-    // Detect intent: preference update or job recommendation request
-    const prefUpdates = extractPreferenceUpdates(message);
-    const wantsJobs = shouldRecommendJobs(message);
+    // Detect intent: LLM first, regex fallback
+    const existingPrefs = db.prepare("SELECT * FROM preferences WHERE user_id = ?").get(userId) as any;
+    const llmDeltas = await extractPreferenceUpdatesLLM(message, existingPrefs || {});
+    let prefUpdates: Record<string, any> | undefined;
 
-    // Save preference updates (location, industry etc.)
-    // The actual matching + card rendering is handled by SSE /matching/stream from frontend
-    if (prefUpdates) {
+    if (llmDeltas) {
+      prefUpdates = applyDeltas(llmDeltas, existingPrefs || null);
+      console.log("[Chat] LLM extracted prefs:", JSON.stringify(prefUpdates));
+    } else {
+      // Fallback to regex
+      prefUpdates = extractPreferenceUpdates(message);
+      if (prefUpdates) console.log("[Chat] Regex extracted prefs:", JSON.stringify(prefUpdates));
+    }
+
+    // Save preference updates
+    if (prefUpdates && Object.keys(prefUpdates).length > 0) {
       try { mergePreferences(userId, prefUpdates); } catch (e) { console.error("[Chat] Pref merge:", e); }
     }
 
@@ -155,9 +164,20 @@ router.post("/", async (req, res, next) => {
       if (existingMatches.length > 0) recommendations = existingMatches;
     } catch (e) { console.error("[Chat] Match lookup error:", e); }
 
-    // Build system prompt — inject real job data and user's rejected jobs so AI doesn't hallucinate
-    let systemPrompt = `You are Jobro, an AI career assistant. Help the user refine their job preferences through natural conversation. Be concise and friendly. Never claim you are offline or unavailable — you are currently active and ready to help.
-IMPORTANT: Your reply must ONLY describe the jobs listed below. Do NOT mention or describe any job that is not in the list. The user will see job cards rendered separately below your message, so just briefly explain why these specific jobs match their preferences.`;
+    // Build system prompt — inject real job data, rejected jobs, and matching discipline
+    let systemPrompt = `# Role
+你是一位顶级的 AI 求职匹配专家（Jobro），帮助用户通过自然对话优化求职偏好并匹配岗位。
+
+# 核心纪律
+1. 【最高优先级 - 绝对否决权】：用户在当前对话中提出的任何硬性条件（城市、薪资、技术栈、排除类型等），必须严格遵守。候选人明确排除的职位/地点绝对不要推荐。
+2. 【次级优先级】：在满足硬性条件后，再根据用户简历画像进行技能和经验的语义匹配。
+3. 用户当前要求与简历冲突时，**100% 以本次要求为准**。
+
+# 对话规则
+- Your reply must ONLY describe the jobs listed below. Do NOT mention or describe any job that is not in the list.
+- Never claim you are offline or unavailable — you are currently active and ready to help.
+- 用户将在下方看到岗位卡片，你只需要简要解释为什么这些岗位匹配TA的偏好。
+- 如果当前没有匹配项，坦诚告知并建议放宽条件，**绝对禁止**为了凑数推荐不合规岗位。`;
 
     // Add rejected jobs context so AI knows user's dislikes
     const rejectedJobs = db.prepare(
@@ -216,7 +236,14 @@ IMPORTANT: Your reply must ONLY describe the jobs listed below. Do NOT mention o
     insert.run(userId, "user", message);
     insert.run(userId, "assistant", reply);
 
-    res.json({ reply, user_id: userId, recommendations: undefined });
+    res.json({
+      reply,
+      user_id: userId,
+      recommendations: undefined,
+      // Pass user's message and extracted prefs back so frontend can feed them to matching
+      userMessage: message,
+      prefUpdates: prefUpdates || null,
+    });
   } catch (e) {
     next(e);
   }

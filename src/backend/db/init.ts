@@ -7,6 +7,42 @@ function safeAddColumn(table: string, column: string, definition: string) {
   }
 }
 
+function safeAddIndex(indexName: string, table: string, columns: string, unique = false) {
+  const rows = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`).all(indexName) as any[];
+  if (rows.length === 0) {
+    const uniqueKw = unique ? "UNIQUE" : "";
+    try {
+      db.exec(`CREATE ${uniqueKw} INDEX ${indexName} ON ${table}(${columns})`);
+    } catch (e: any) {
+      console.warn(`[DB] Cannot create ${uniqueKw} INDEX ${indexName}: ${e.message}`);
+    }
+  }
+}
+
+function migratePlatformSessions() {
+  // Check if the old UNIQUE(user_id) constraint is still there
+  const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'platform_sessions'").get() as any;
+  if (sql && sql.sql && sql.sql.includes("user_id INTEGER NOT NULL UNIQUE")) {
+    console.log("[DB] Migrating platform_sessions to UNIQUE(user_id, platform)...");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS platform_sessions_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        platform TEXT NOT NULL DEFAULT 'boss',
+        cookies TEXT,
+        is_valid INTEGER DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, platform),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+      INSERT OR IGNORE INTO platform_sessions_new (id, user_id, platform, cookies, is_valid, updated_at)
+        SELECT id, user_id, platform, cookies, is_valid, updated_at FROM platform_sessions;
+      DROP TABLE platform_sessions;
+      ALTER TABLE platform_sessions_new RENAME TO platform_sessions;
+    `);
+  }
+}
+
 export function initSchema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -114,6 +150,25 @@ export function initSchema() {
       updated_by INTEGER,
       FOREIGN KEY (updated_by) REFERENCES users(id)
     );
+
+    CREATE TABLE IF NOT EXISTS platform_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      platform TEXT NOT NULL DEFAULT 'boss',
+      cookies TEXT,
+      is_valid INTEGER DEFAULT 0,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, platform),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS boss_greet_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL UNIQUE,
+      greeting_template TEXT NOT NULL DEFAULT '您好，我对{jobName}岗位很感兴趣，希望可以进一步沟通。',
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
   `);
 
   safeAddColumn("users", "role", "TEXT NOT NULL DEFAULT 'user'");
@@ -121,6 +176,16 @@ export function initSchema() {
   safeAddColumn("preferences", "excluded_roles", "TEXT");
   safeAddColumn("preferences", "excluded_locations", "TEXT");
   safeAddColumn("conversations", "created_at", "DATETIME DEFAULT CURRENT_TIMESTAMP");
+
+  // Dedup & tracking columns for multi-platform scraping
+  safeAddColumn("jobs", "group_id", "TEXT");
+  safeAddColumn("jobs", "first_seen", "DATETIME");
+  safeAddColumn("jobs", "last_seen", "DATETIME");
+  safeAddColumn("jobs", "seen_count", "INTEGER DEFAULT 1");
+  safeAddIndex("idx_jobs_source_url", "jobs", "source, source_url", true);
+
+  // Migrate platform_sessions: old schema had UNIQUE(user_id), new needs UNIQUE(user_id, platform)
+  migratePlatformSessions();
 
   const seedConfig = db.prepare(
     "INSERT OR IGNORE INTO system_config (key, value, description) VALUES (?, ?, ?)"

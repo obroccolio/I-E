@@ -45,10 +45,12 @@ export const api = {
   bulkImportJobs: (jobs: any[]) => req("POST", "/jobs/bulk", { jobs }),
   getRecommendations: (limit?: number) => req("GET", `/matching/recommendations?limit=${limit ?? 10}`),
   runMatching: (limit?: number) => req("POST", "/matching/run", { limit }),
-  streamMatching: (limit: number, onStep: (step: any) => void): Promise<any[]> => {
+  streamMatching: (limit: number, onStep: (step: any) => void, chatContext?: string): Promise<any[]> => {
     const token = localStorage.getItem("token");
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (chatContext) params.set("chatContext", chatContext);
     return new Promise((resolve, reject) => {
-      fetch(`${API_BASE}/matching/stream?limit=${limit}`, {
+      fetch(`${API_BASE}/matching/stream?${params.toString()}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       }).then(res => {
         const reader = res.body!.getReader();
@@ -85,4 +87,91 @@ export const api = {
   scoreResume: (resumeText: string, targetJD?: string) => req("POST", "/resume/score", { resumeText, targetJD }),
   optimizeResume: (resumeText: string, targetJD?: string) =>
     req("POST", "/resume/optimize", { resumeText, targetJD }),
+
+  // Boss 直聘一键打招呼
+  getBossSettings: () => req("GET", "/boss/settings"),
+  saveBossSettings: (greetingTemplate: string) => req("PUT", "/boss/settings", { greetingTemplate }),
+  saveBossCookies: (cookies: string) => req("POST", "/boss/cookies", { cookies, platform: "boss" }),
+  checkBossCookies: () => req("GET", "/boss/cookies/status?platform=boss"),
+  savePlatformCookies: (platform: string, cookies: string) => req("POST", "/boss/cookies", { cookies, platform }),
+  checkPlatformCookies: (platform: string) => req("GET", `/boss/cookies/status?platform=${platform}`),
+  streamBossGreet: (jobId: number, onStep: (step: { type: string; label: string; detail: string }) => void): Promise<{ success: boolean; message: string }> => {
+    const token = localStorage.getItem("token");
+    return new Promise((resolve, reject) => {
+      fetch(`${API_BASE}/boss/greet/${jobId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).then(res => {
+        if (!res.ok) {
+          res.json().then(data => reject(new Error(data.message || "打招呼失败"))).catch(() => reject(new Error(`HTTP ${res.status}`)));
+          return;
+        }
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        (function read() {
+          reader.read().then(({ done, value }) => {
+            if (done) { resolve({ success: true, message: "完成" }); return; }
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop()!;
+            for (const part of parts) {
+              const raw = part.replace(/^data: /, "");
+              if (!raw) continue;
+              try {
+                const parsed = JSON.parse(raw);
+                if (parsed.type === "result") resolve(parsed);
+                else onStep(parsed);
+              } catch {}
+            }
+            read();
+          }).catch(reject);
+        })();
+      }).catch(reject);
+    });
+  },
+
+  // 多平台岗位爬取 (Boss / 猎聘 / 智联)
+  streamBossScrape: (keywords: string[], cities: string[], maxPer: number, onStep: (step: any) => void): Promise<{ total: number; inserted: number }> => {
+    return api.streamScrape("boss", keywords, cities, maxPer, onStep);
+  },
+  streamScrape: (platform: string, keywords: string[], cities: string[], maxPer: number, onStep: (step: any) => void): Promise<{ total: number; inserted: number }> => {
+    const token = localStorage.getItem("token");
+    const params = new URLSearchParams();
+    if (keywords.length > 0) params.set("keywords", keywords.join(","));
+    if (cities.length > 0) params.set("cities", cities.join(","));
+    params.set("maxPer", String(maxPer || 15));
+
+    params.set("platform", platform);
+    return new Promise((resolve, reject) => {
+      fetch(`${API_BASE}/boss/scrape?${params.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).then(res => {
+        if (!res.ok) {
+          res.json().then(data => reject(new Error(data.message || "爬取失败"))).catch(() => reject(new Error(`HTTP ${res.status}`)));
+          return;
+        }
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        (function read() {
+          reader.read().then(({ done, value }) => {
+            if (done) { resolve({ total: 0, inserted: 0 }); return; }
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop()!;
+            for (const part of parts) {
+              const raw = part.replace(/^data: /, "");
+              if (!raw) continue;
+              try {
+                const parsed = JSON.parse(raw);
+                if (parsed.type === "result") resolve(parsed);
+                else onStep(parsed);
+              } catch {}
+            }
+            read();
+          }).catch(reject);
+        })();
+      }).catch(reject);
+    });
+  },
 };

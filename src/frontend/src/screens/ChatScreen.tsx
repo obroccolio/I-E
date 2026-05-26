@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { Send, Phone, MessageSquare, Briefcase, Menu, MapPin, CheckCircle2, Edit3, X, Clock } from "lucide-react";
+import { Send, Phone, MessageSquare, Briefcase, Menu, MapPin, CheckCircle2, Edit3, X, Clock, Loader2, Zap } from "lucide-react";
 import { Sidebar } from "../components/Sidebar";
 import { Logo } from "../components/Logo";
 import { api } from "../lib/api";
@@ -67,6 +67,10 @@ export function ChatScreen() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasAddedSummary = useRef(false);
+
+  const [greetingMatchId, setGreetingMatchId] = useState<number | null>(null);
+  const [greetSteps, setGreetSteps] = useState<{ type: string; label: string; detail: string }[]>([]);
+  const [greetDone, setGreetDone] = useState(false);
 
   const mapRecsToJobData = (recs: any[]): JobData[] => recs.map((r: any) => ({
     id: String(r.job_id ?? r.id),
@@ -248,14 +252,14 @@ export function ChatScreen() {
         } catch { /* non-critical */ }
 
         // Step 2: SSE streaming matching with Agent steps
-        // Check if previous matches should be cleared first (new prefs → force refresh)
+        // Pass user's message as chatContext so AI can honor current-turn requirements
         const recs = await api.streamMatching(10, (step) => {
           setMessages(prev => prev.map(m =>
             m.id === agentMsgId
               ? { ...m, agentSteps: [...(m.agentSteps || []), step] }
               : m
           ));
-        });
+        }, userText);
 
         // Step 3: Remove agent process card, render final reply + cards
         if (agentMsgId) {
@@ -414,6 +418,31 @@ export function ChatScreen() {
     }
   };
 
+  const handleGreet = async (jobId: number, matchId: number, jobTitle: string, company: string) => {
+    if (greetingMatchId) return;
+    setGreetingMatchId(matchId);
+    setGreetSteps([]);
+    setGreetDone(false);
+
+    try {
+      await api.streamBossGreet(jobId, (step) => {
+        setGreetSteps(prev => [...prev, step]);
+      });
+      setGreetDone(true);
+    } catch (err: any) {
+      setGreetSteps(prev => [...prev, { type: "error", label: "打招呼失败", detail: err.message || "未知错误" }]);
+      setGreetDone(true);
+    }
+
+    try { await api.updateMatchStatus(matchId, "accepted"); } catch {}
+
+    setTimeout(() => {
+      setGreetingMatchId(null);
+      setGreetSteps([]);
+      setGreetDone(false);
+    }, 2500);
+  };
+
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans overflow-hidden">
       {!selectedJob && <Sidebar />}
@@ -428,6 +457,57 @@ export function ChatScreen() {
           <span className="font-semibold">Jobro</span>
           <div className="w-8 h-8" /> {/* Spacer */}
         </header>
+
+        {/* Greet Progress Overlay */}
+        {greetingMatchId && (
+          <div className="absolute inset-0 z-30 bg-white/60 backdrop-blur-sm flex items-start justify-center pt-32">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white border border-gray-200 rounded-2xl shadow-xl p-6 w-full max-w-sm mx-4"
+            >
+              <div className="flex items-center gap-2 mb-4">
+                {greetDone ? (
+                  <CheckCircle2 className="w-5 h-5 text-green-500" />
+                ) : (
+                  <div className="w-5 h-5 border-2 border-[#5c9be6] border-t-transparent rounded-full animate-spin" />
+                )}
+                <h3 className="font-semibold text-gray-900">Boss 直聘 · 一键打招呼</h3>
+              </div>
+              <div className="space-y-3">
+                {greetSteps.map((step, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.1 }}
+                    className="flex items-start gap-2.5"
+                  >
+                    {step.type === "done" ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                    ) : step.type === "messaging" ? (
+                      <Send className="w-4 h-4 text-[#5c9be6] mt-0.5 shrink-0" />
+                    ) : (
+                      <div className="w-2 h-2 bg-[#5c9be6] rounded-full mt-1.5 shrink-0" />
+                    )}
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{step.label}</p>
+                      <p className="text-xs text-gray-500">{step.detail}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+              {greetDone && (
+                <button
+                  onClick={() => { setGreetingMatchId(null); setGreetSteps([]); setGreetDone(false); }}
+                  className="mt-4 w-full py-2 bg-green-50 text-green-700 rounded-lg text-sm font-semibold hover:bg-green-100 transition-colors"
+                >
+                  完成
+                </button>
+              )}
+            </motion.div>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8">
@@ -590,24 +670,29 @@ export function ChatScreen() {
 
                             <p className="text-sm text-gray-700 leading-relaxed line-clamp-3 mb-4 flex-1">{job.matchReason}</p>
 
-                            <div className="flex gap-3 mt-auto">
+                            <div className="flex gap-2 mt-auto">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handlePassJob(job.match_id);
                                 }}
-                                className="flex-1 bg-white border border-gray-200 text-gray-700 text-sm font-semibold py-2 rounded-full hover:bg-gray-50 transition-colors"
+                                className="flex-1 bg-white border border-gray-200 text-gray-700 text-xs font-semibold py-2 rounded-full hover:bg-gray-50 transition-colors"
                               >
                                 {t("chat.notInterested")}
                               </button>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleApplyJob(job.match_id);
+                                  handleGreet(job.id, job.match_id, job.title, job.company);
                                 }}
-                                className="flex-1 bg-[#113a7a] text-white text-sm font-semibold py-2 rounded-full hover:bg-[#0d2b5c] transition-colors"
+                                disabled={greetingMatchId === job.match_id}
+                                className="flex-1 bg-[#113a7a] text-white text-xs font-semibold py-2 rounded-full hover:bg-[#0d2b5c] disabled:opacity-50 transition-colors flex items-center justify-center gap-1"
                               >
-                                {t("common.apply")}
+                                {greetingMatchId === job.match_id ? (
+                                  <><Loader2 className="w-3 h-3 animate-spin" /> 打招呼中</>
+                                ) : (
+                                  <><Zap className="w-3 h-3" /> 一键打招呼</>
+                                )}
                               </button>
                             </div>
                           </div>
@@ -772,12 +857,13 @@ export function ChatScreen() {
               </button>
               <button
                 onClick={() => {
-                  handleApplyJob(selectedJob.match_id);
+                  handleGreet(selectedJob.match_id, selectedJob.title, selectedJob.company);
                   setSelectedJob(null);
                 }}
-                className="flex-1 bg-[#113a7a] text-white font-semibold py-3 rounded-xl hover:bg-[#0d2b5c] transition-colors"
+                disabled={greetingMatchId === selectedJob.match_id}
+                className="flex-1 bg-[#113a7a] text-white font-semibold py-3 rounded-xl hover:bg-[#0d2b5c] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {t("common.applyNow")}
+                <Zap className="w-4 h-4" /> 一键打招呼
               </button>
             </div>
           </div>

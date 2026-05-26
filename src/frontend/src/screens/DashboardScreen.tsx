@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { BadgeCheck, MapPin, Clock, X, CheckCircle2 } from "lucide-react";
+import { BadgeCheck, MapPin, Clock, X, CheckCircle2, Send, Loader2 } from "lucide-react";
 import { Sidebar } from "../components/Sidebar";
 import { api } from "../lib/api";
 
@@ -56,6 +56,9 @@ export function DashboardScreen() {
   const [rejectedJobs, setRejectedJobs] = useState<JobData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [greetingJobId, setGreetingJobId] = useState<number | null>(null);
+  const [greetSteps, setGreetSteps] = useState<{ type: string; label: string; detail: string }[]>([]);
+  const [greetDone, setGreetDone] = useState(false);
   const { t } = useTranslation();
 
   const token = localStorage.getItem("token");
@@ -137,6 +140,35 @@ export function DashboardScreen() {
     }
   };
 
+  const handleGreet = async (job: JobData) => {
+    if (!job.match_id || greetingJobId) return;
+    setGreetingJobId(job.id);
+    setGreetSteps([]);
+    setGreetDone(false);
+
+    try {
+      await api.streamBossGreet(job.id, (step) => {
+        setGreetSteps(prev => [...prev, step]);
+      });
+      setGreetDone(true);
+    } catch (err: any) {
+      setGreetSteps(prev => [...prev, { type: "error", label: "打招呼失败", detail: err.message || "未知错误" }]);
+      setGreetDone(true);
+    }
+
+    try {
+      await api.updateMatchStatus(job.match_id, "accepted");
+      setSuggestedJobs(prev => prev.filter(j => j.id !== job.id));
+      setAppliedJobs(prev => [mapMatchRow({ ...job, status: "accepted" }), ...prev]);
+    } catch {}
+
+    setTimeout(() => {
+      setGreetingJobId(null);
+      setGreetSteps([]);
+      setGreetDone(false);
+    }, 2500);
+  };
+
   return (
     <div className="h-screen bg-white flex overflow-hidden">
       <Sidebar />
@@ -144,7 +176,58 @@ export function DashboardScreen() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-8 md:p-12">
+        <div className="flex-1 overflow-y-auto p-8 md:p-12 relative">
+          {/* Greet Progress Overlay */}
+          {greetingJobId && (
+            <div className="absolute inset-0 z-10 bg-white/60 backdrop-blur-sm flex items-start justify-center pt-32">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-white border border-gray-200 rounded-2xl shadow-xl p-6 w-full max-w-sm"
+              >
+                <div className="flex items-center gap-2 mb-4">
+                  {greetDone ? (
+                    <CheckCircle2 className="w-5 h-5 text-green-500" />
+                  ) : (
+                    <div className="w-5 h-5 border-2 border-[#5c9be6] border-t-transparent rounded-full animate-spin" />
+                  )}
+                  <h3 className="font-semibold text-gray-900">Boss 直聘 · 一键打招呼</h3>
+                </div>
+                <div className="space-y-3">
+                  {greetSteps.map((step, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.1 }}
+                      className="flex items-start gap-2.5"
+                    >
+                      {step.type === "done" ? (
+                        <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                      ) : step.type === "messaging" ? (
+                        <Send className="w-4 h-4 text-[#5c9be6] mt-0.5 shrink-0" />
+                      ) : (
+                        <div className="w-2 h-2 bg-[#5c9be6] rounded-full mt-1.5 shrink-0" />
+                      )}
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{step.label}</p>
+                        <p className="text-xs text-gray-500">{step.detail}</p>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+                {greetDone && (
+                  <button
+                    onClick={() => { setGreetingJobId(null); setGreetSteps([]); setGreetDone(false); }}
+                    className="mt-4 w-full py-2 bg-green-50 text-green-700 rounded-lg text-sm font-semibold hover:bg-green-100 transition-colors"
+                  >
+                    完成
+                  </button>
+                )}
+              </motion.div>
+            </div>
+          )}
+
           <div className="max-w-4xl mx-auto">
             {/* Tabs */}
             <div className="flex items-center gap-6 border-b border-gray-200 mb-6">
@@ -265,6 +348,17 @@ export function DashboardScreen() {
                                 {job.matchScore}
                               </span>
                             )}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleGreet(job); }}
+                              disabled={greetingJobId === job.id}
+                              className="ml-auto flex items-center gap-1 px-3 py-1.5 bg-[#113a7a] text-white rounded-full text-xs font-semibold hover:bg-[#0d2b5c] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {greetingJobId === job.id ? (
+                                <><Loader2 className="w-3 h-3 animate-spin" /> 打招呼中</>
+                              ) : (
+                                <><Send className="w-3 h-3" /> 一键打招呼</>
+                              )}
+                            </button>
                           </div>
                         </div>
                       </motion.div>
