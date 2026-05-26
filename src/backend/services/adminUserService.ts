@@ -73,6 +73,8 @@ export function updateUser(id: number, data: { role?: string; email?: string }) 
 
 export function deleteUser(id: number) {
   const del = db.transaction(() => {
+    db.prepare("DELETE FROM platform_sessions WHERE user_id = ?").run(id);
+    db.prepare("DELETE FROM boss_greet_settings WHERE user_id = ?").run(id);
     db.prepare("DELETE FROM events WHERE user_id = ?").run(id);
     db.prepare("DELETE FROM conversations WHERE user_id = ?").run(id);
     db.prepare("DELETE FROM matches WHERE user_id = ?").run(id);

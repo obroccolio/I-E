@@ -11,7 +11,12 @@ import {
   Bell,
   Globe,
   HelpCircle,
-  ChevronRight
+  ChevronRight,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  MessageSquareText,
+  Cookie,
 } from "lucide-react";
 import { Sidebar } from "../components/Sidebar";
 
@@ -20,6 +25,11 @@ export function SettingsScreen() {
   const { t, i18n } = useTranslation();
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [pushNotifications, setPushNotifications] = useState(true);
+  const [bossCookies, setBossCookies] = useState("");
+  const [bossGreeting, setBossGreeting] = useState("您好，我对{jobName}岗位很感兴趣，希望可以进一步沟通。");
+  const [cookieStatus, setCookieStatus] = useState<"idle" | "checking" | "valid" | "invalid">("idle");
+  const [savingBoss, setSavingBoss] = useState(false);
+  const [bossSaved, setBossSaved] = useState(false);
 
   const handleLanguageChange = (lang: string) => {
     i18n.changeLanguage(lang);
@@ -39,6 +49,28 @@ export function SettingsScreen() {
     } catch (e: any) {
       alert(e.message || "Failed to delete account");
     }
+  };
+
+  const handleCheckCookies = async () => {
+    if (!bossCookies.trim()) return;
+    setCookieStatus("checking");
+    try {
+      await api.saveBossCookies(bossCookies.trim());
+      const res = await api.checkBossCookies();
+      setCookieStatus(res.valid ? "valid" : "invalid");
+    } catch {
+      setCookieStatus("invalid");
+    }
+  };
+
+  const handleSaveBossSettings = async () => {
+    setSavingBoss(true);
+    try {
+      await api.saveBossSettings(bossGreeting);
+      setBossSaved(true);
+      setTimeout(() => setBossSaved(false), 2000);
+    } catch {}
+    finally { setSavingBoss(false); }
   };
 
   return (
@@ -121,6 +153,91 @@ export function SettingsScreen() {
                     <option value="zh-HK">{t("settings.langZhHK")}</option>
                   </select>
                 </div>
+              </div>
+            </section>
+
+            {/* Boss 直聘配置 Section */}
+            <section>
+              <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Boss 直聘 · 一键打招呼</h2>
+              <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+
+                {/* Cookie 管理 */}
+                <div className="p-5 border-b border-gray-100">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center">
+                      <Cookie className="w-5 h-5 text-orange-500" />
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-900">Boss 直聘 Cookie</div>
+                      <div className="text-sm text-gray-500">
+                        {cookieStatus === "valid"
+                          ? "Cookie 有效，可以正常使用打招呼功能"
+                          : cookieStatus === "invalid"
+                          ? "Cookie 无效，请重新获取"
+                          : "粘贴 Boss 直聘的 Cookie 以启用自动打招呼"}
+                      </div>
+                    </div>
+                    {cookieStatus === "valid" && <CheckCircle2 className="w-5 h-5 text-green-500 ml-auto shrink-0" />}
+                    {cookieStatus === "invalid" && <XCircle className="w-5 h-5 text-red-400 ml-auto shrink-0" />}
+                  </div>
+                  <textarea
+                    value={bossCookies}
+                    onChange={(e) => { setBossCookies(e.target.value); setCookieStatus("idle"); }}
+                    placeholder={`[{"name":"__zp_stoken__","value":"...","domain":".zhipin.com",...}]`}
+                    rows={4}
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-[#5c9be6]/20 focus:border-[#5c9be6]"
+                  />
+                  <div className="flex items-center justify-between mt-3">
+                    <p className="text-xs text-gray-400">
+                      在浏览器登录 boss.zhipin.com 后，从 DevTools → Application → Cookies 导出
+                    </p>
+                    <button
+                      onClick={handleCheckCookies}
+                      disabled={!bossCookies.trim() || cookieStatus === "checking"}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-[#113a7a] text-white rounded-lg text-xs font-semibold hover:bg-[#0d2b5c] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {cookieStatus === "checking" ? (
+                        <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> 验证中...</>
+                      ) : (
+                        "验证 Cookie"
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 招呼语模板 */}
+                <div className="p-5">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                      <MessageSquareText className="w-5 h-5 text-blue-500" />
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-900">招呼语模板</div>
+                      <div className="text-sm text-gray-500">点击「一键打招呼」时将自动发送此消息</div>
+                    </div>
+                  </div>
+                  <textarea
+                    value={bossGreeting}
+                    onChange={(e) => setBossGreeting(e.target.value)}
+                    rows={3}
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#5c9be6]/20 focus:border-[#5c9be6]"
+                  />
+                  <div className="flex items-center justify-between mt-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-md">{'{jobName}'} 职位名称</span>
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-md">{'{company}'} 公司名</span>
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-md">{'{salary}'} 薪资</span>
+                    </div>
+                    <button
+                      onClick={handleSaveBossSettings}
+                      disabled={savingBoss}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-[#113a7a] text-white rounded-lg text-xs font-semibold hover:bg-[#0d2b5c] disabled:opacity-40 transition-colors"
+                    >
+                      {bossSaved ? <><CheckCircle2 className="w-3.5 h-3.5" /> 已保存</> : savingBoss ? "保存中..." : "保存模板"}
+                    </button>
+                  </div>
+                </div>
+
               </div>
             </section>
 
